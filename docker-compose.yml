@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  scylla:
+    image: scylladb/scylla:latest
+    container_name: scylla-db
+    ports:
+      - "9042:9042"
+    environment:
+      - SCYLLA_DC=datacenter1
+      - SCYLLA_CLUSTER_NAME=payment_gateway_cluster
+    volumes:
+      - scylla_data:/var/lib/scylla
+    command: --smp 1 --memory 750M --overprovisioned 1 --api-address 0.0.0.0
+
+volumes:
+  scylla_data: 
