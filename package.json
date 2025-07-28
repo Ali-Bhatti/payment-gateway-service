@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "test": "mocha test/paymentGateway.unit.test.js --timeout 10000",
-    "test:paymentGateway": "mocha test/paymentGateway.unit.test.js --timeout 20000"
+    "test:paymentGatewayUnit": "mocha test/paymentGateway.unit.test.js --timeout 20000",
+    "test:paymentGatewayInt": "mocha test/paymentGateway.integration.test.js --timeout 20000",
+    "test:scyllaDb" : "mocha test/scyllaDb.test.js --timeout 20000",
+    "test:scyllaDbMarshall" : "mocha test/scyllaDb.marshalling.unit.test.js --timeout 20000"
   },
   "keywords": [],
   "author": "",

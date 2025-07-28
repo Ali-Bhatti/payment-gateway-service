@@ -1,8 +1,13 @@
-import { ScyllaDb } from '../../utils/ScyllaDb.js'
+import dotenv from 'dotenv';
+dotenv.config();
+import ScyllaDb from '../../utils/ScyllaDb.js'
+
+const isTestEnv = ['test'].includes(process.env.NODE_ENV);
+const TABLE_SUFFIX = isTestEnv ? '_test' : '';
 
 const schemas = {
-  paymentGateway_sessions: {
-    TableName: 'paymentGateway_sessions',
+  ['paymentGateway_sessions' + TABLE_SUFFIX]: {
+    TableName: 'paymentGateway_sessions' + TABLE_SUFFIX,
     KeySchema: [
       { AttributeName: 'pk', KeyType: 'HASH' },
       { AttributeName: 'sk', KeyType: 'RANGE' }
@@ -11,10 +16,12 @@ const schemas = {
       { AttributeName: 'pk', AttributeType: 'S' },
       { AttributeName: 'sk', AttributeType: 'S' }
     ],
-    BillingMode: 'PAY_PER_REQUEST'
+    BillingMode: 'PAY_PER_REQUEST',
+    PK: 'pk',
+    SK: 'sk'
   },
-  paymentGateway_transactions: {
-    TableName: 'paymentGateway_transactions',
+  ['paymentGateway_transactions' + TABLE_SUFFIX]: {
+    TableName: 'paymentGateway_transactions' + TABLE_SUFFIX,
     KeySchema: [
       { AttributeName: 'pk', KeyType: 'HASH' },
       { AttributeName: 'sk', KeyType: 'RANGE' }
@@ -22,7 +29,7 @@ const schemas = {
     AttributeDefinitions: [
       { AttributeName: 'pk', AttributeType: 'S' },
       { AttributeName: 'sk', AttributeType: 'S' },
-      { AttributeName: 'statusGSI', AttributeType: 'S' }
+      { AttributeName: 'statusGSI', AttributeType: 'S' },
     ],
     GlobalSecondaryIndexes: [
       {
@@ -31,10 +38,12 @@ const schemas = {
         Projection: { ProjectionType: 'ALL' }
       }
     ],
-    BillingMode: 'PAY_PER_REQUEST'
+    BillingMode: 'PAY_PER_REQUEST',
+    PK: 'pk',
+    SK: 'sk'
   },
-  paymentGateway_schedules: {
-    TableName: 'paymentGateway_schedules',
+  ['paymentGateway_schedules' + TABLE_SUFFIX]: {
+    TableName: 'paymentGateway_schedules' + TABLE_SUFFIX,
     KeySchema: [
       { AttributeName: 'pk', KeyType: 'HASH' },
       { AttributeName: 'sk', KeyType: 'RANGE' }
@@ -51,10 +60,12 @@ const schemas = {
         Projection: { ProjectionType: 'ALL' }
       }
     ],
-    BillingMode: 'PAY_PER_REQUEST'
+    BillingMode: 'PAY_PER_REQUEST',
+    PK: 'pk',
+    SK: 'sk'
   },
-  paymentGateway_tokens: {
-    TableName: 'paymentGateway_tokens',
+  ['paymentGateway_tokens' + TABLE_SUFFIX]: {
+    TableName: 'paymentGateway_tokens' + TABLE_SUFFIX,
     KeySchema: [
       { AttributeName: 'pk', KeyType: 'HASH' },
       { AttributeName: 'sk', KeyType: 'RANGE' }
@@ -71,10 +82,12 @@ const schemas = {
         Projection: { ProjectionType: 'ALL' }
       }
     ],
-    BillingMode: 'PAY_PER_REQUEST'
+    BillingMode: 'PAY_PER_REQUEST',
+    PK: 'pk',
+    SK: 'sk'
   },
-  paymentGateway_webhooks: {
-    TableName: 'paymentGateway_webhooks',
+  ['paymentGateway_webhooks' + TABLE_SUFFIX]: {
+    TableName: 'paymentGateway_webhooks' + TABLE_SUFFIX,
     KeySchema: [
       { AttributeName: 'pk', KeyType: 'HASH' },
       { AttributeName: 'sk', KeyType: 'RANGE' }
@@ -91,14 +104,16 @@ const schemas = {
         Projection: { ProjectionType: 'ALL' }
       }
     ],
-    BillingMode: 'PAY_PER_REQUEST'
+    BillingMode: 'PAY_PER_REQUEST',
+    PK: 'pk',
+    SK: 'sk'
   }
 }
 
 async function createTables() {
 
   for (const [tableName, schema] of Object.entries(schemas)) {
-    console.log("for table---->", tableName);
+    //console.log("for table---->", tableName);
     await ScyllaDb.createTable(schema).then(() =>
       console.log(`✅ Created table: ${tableName}`)
     ).catch(err =>
@@ -107,4 +122,21 @@ async function createTables() {
   }
 }
 
-createTables();
+async function deleteTables() {
+  for (const [tableName] of Object.entries(schemas)) {
+    try {
+      await ScyllaDb.deleteTable(tableName);
+      console.log(`✅ Deleted table: ${tableName}`)
+    } catch (err) {
+      console.error(`Failed to delete table ${tableName}:`, err.message);
+    }
+  }
+}
+
+// createTables()
+
+export { schemas };
+export default {
+  createTables,
+  deleteTables
+};

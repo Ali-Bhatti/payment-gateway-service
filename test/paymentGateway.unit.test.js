@@ -3,6 +3,17 @@ import sinon from 'sinon'
 import scylla_db from '../src/utils/ScyllaDb.js'
 import payment_gateway_service from '../src/services/paymentGateway/service.js'
 
+// Match table name logic from service.js
+const isTestEnv = ['test'].includes(process.env.NODE_ENV);
+const TABLE_SUFFIX = isTestEnv ? '_test' : '';
+const table_names = {
+  sessions: 'paymentGateway_sessions' + TABLE_SUFFIX,
+  transactions: 'paymentGateway_transactions' + TABLE_SUFFIX,
+  tokens: 'paymentGateway_tokens' + TABLE_SUFFIX,
+  schedules: 'paymentGateway_schedules' + TABLE_SUFFIX,
+  webhooks: 'paymentGateway_webhooks' + TABLE_SUFFIX
+};
+
 describe('payment_gateway_service', () => {
 
   afterEach(() => {
@@ -16,11 +27,22 @@ describe('payment_gateway_service', () => {
       const fakeResult = [{ transactionId: 'txn1' }];
       const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_user_transactions('user123', '2025-01-01', '2025-12-31');
+      const userId = 'user123';
+      const startDate = '2025-01-01';
+      const endDate = '2025-12-31';
+
+      const result = await payment_gateway_service.get_user_transactions(userId, startDate, endDate);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_transactions', '#pk = :pk AND created_at BETWEEN :start AND :end',
-        { ':pk': 'user#user123', ':start': '2025-01-01', ':end': '2025-12-31' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.transactions,
+        '#pk = :pk',
+        { ':pk': `user#${userId}`, ':start': startDate, ':end': endDate }, // ExpressionAttributeValues
+        {
+          ExpressionAttributeNames: { '#pk': 'pk' },
+          FilterExpression: 'createdAt BETWEEN :start AND :end'
+        }
+      )).to.be.true;
     });
   });
 
@@ -29,11 +51,22 @@ describe('payment_gateway_service', () => {
       const fakeResult = [{ scheduleId: 'sched1' }];
       const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_user_schedules('user123', '2025-01-01', '2025-12-31');
+      const userId = 'user123';
+      const startDate = '2025-01-01';
+      const endDate = '2025-12-31';
+
+      const result = await payment_gateway_service.get_user_schedules(userId, startDate, endDate);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_schedules', '#pk = :pk AND created_at BETWEEN :start AND :end',
-        { ':pk': 'user#user123', ':start': '2025-01-01', ':end': '2025-12-31' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.schedules,
+        '#pk = :pk',
+        { ':pk': `user#${userId}`, ':start': startDate, ':end': endDate }, // ExpressionAttributeValues
+        {
+          ExpressionAttributeNames: { '#pk': 'pk' },
+          FilterExpression: 'createdAt BETWEEN :start AND :end',
+        }
+      )).to.be.true;
     });
   });
 
@@ -42,24 +75,60 @@ describe('payment_gateway_service', () => {
       const fakeResult = [{ scheduleId: 'sched1' }];
       const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_subscription_schedules('sub123', '2025-01-01', '2025-12-31');
+      const subscriptionId = 'sub123';
+      const startDate = '2025-01-01';
+      const endDate = '2025-12-31';
+
+      const result = await payment_gateway_service.get_subscription_schedules(subscriptionId, startDate, endDate);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_schedules', '#gsi_subscription_pk = :gsi AND created_at BETWEEN :start AND :end',
-        { ':gsi': 'sub#sub123', ':start': '2025-01-01', ':end': '2025-12-31' }, { indexName: 'gsi1' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.schedules,
+        '#subscriptionId = :gsi', // gsi_attribute_names.subscription_pk resolves to '#subscriptionId'
+        { ':gsi': `sub#${subscriptionId}`, ':start': startDate, ':end': endDate }, // ExpressionAttributeValues
+        {
+          IndexName: 'schedule_subscription_gsi', // gsi_index_names.subscription_gsi
+          ExpressionAttributeNames: { '#subscriptionId': 'subscriptionId' },
+          FilterExpression: 'createdAt BETWEEN :start AND :end',
+        }
+      )).to.be.true;
     });
   });
 
   describe('get_order_transactions', () => {
     it('should return transactions for an order within date range', async () => {
       const fakeResult = [{ transactionId: 'txn1' }];
-      const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
+      // This now uses scylla_db.scan
+      const stub = sinon.stub(scylla_db, 'scan').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_order_transactions('order123', '2025-01-01', '2025-12-31');
+      const orderId = 'order123';
+      const startDate = '2025-01-01';
+      const endDate = '2025-12-31';
+
+      const result = await payment_gateway_service.get_order_transactions(orderId, startDate, endDate);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_transactions', '#gsi_order_pk = :gsi AND created_at BETWEEN :start AND :end',
-        { ':gsi': 'order#order123', ':start': '2025-01-01', ':end': '2025-12-31' }, { indexName: 'gsi1' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.transactions,
+        'orderId = :orderId AND createdAt BETWEEN :start AND :end', // FilterExpression
+        { ':orderId': orderId, ':start': startDate, ':end': endDate } // ExpressionAttributeValues
+      )).to.be.true;
+    });
+
+    it('should return transactions for an order without date range', async () => {
+      const fakeResult = [{ transactionId: 'txn2' }];
+      const stub = sinon.stub(scylla_db, 'scan').resolves(fakeResult);
+
+      const orderId = 'order123';
+
+      const result = await payment_gateway_service.get_order_transactions(orderId);
+      expect(result).to.deep.equal(fakeResult);
+      expect(stub.calledOnce).to.be.true;
+      expect(stub.calledWith(
+        table_names.transactions,
+        'orderId = :orderId',
+        { ':orderId': orderId }
+      )).to.be.true;
     });
   });
 
@@ -68,24 +137,59 @@ describe('payment_gateway_service', () => {
       const fakeResult = [{ sessionId: 'sess1' }];
       const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_user_sessions('user123', '2025-01-01', '2025-12-31');
+      const userId = 'user123';
+      const startDate = '2025-01-01';
+      const endDate = '2025-12-31';
+
+      const result = await payment_gateway_service.get_user_sessions(userId, startDate, endDate);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_sessions', '#pk = :pk AND created_at BETWEEN :start AND :end',
-        { ':pk': 'user#user123', ':start': '2025-01-01', ':end': '2025-12-31' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.sessions,
+        '#pk = :pk',
+        { ':pk': `user#${userId}`, ':start': startDate, ':end': endDate }, // ExpressionAttributeValues
+        {
+          ExpressionAttributeNames: { '#pk': 'pk' },
+          FilterExpression: 'createdAt BETWEEN :start AND :end'
+        }
+      )).to.be.true;
     });
   });
 
   describe('get_order_sessions', () => {
     it('should return sessions for an order within date range', async () => {
       const fakeResult = [{ sessionId: 'sess1' }];
-      const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
+      // This now uses scylla_db.scan
+      const stub = sinon.stub(scylla_db, 'scan').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_order_sessions('order123', '2025-01-01', '2025-12-31');
+      const orderId = 'order123';
+      const startDate = '2025-01-01';
+      const endDate = '2025-12-31';
+
+      const result = await payment_gateway_service.get_order_sessions(orderId, startDate, endDate);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_sessions', '#gsi_order_pk = :gsi AND created_at BETWEEN :start AND :end',
-        { ':gsi': 'order#order123', ':start': '2025-01-01', ':end': '2025-12-31' }, { indexName: 'gsi1' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.sessions,
+        'orderId = :orderId AND createdAt BETWEEN :start AND :end', // FilterExpression
+        { ':orderId': orderId, ':start': startDate, ':end': endDate } // ExpressionAttributeValues
+      )).to.be.true;
+    });
+
+    it('should return sessions for an order without date range', async () => {
+      const fakeResult = [{ sessionId: 'sess2' }];
+      const stub = sinon.stub(scylla_db, 'scan').resolves(fakeResult);
+
+      const orderId = 'order123';
+
+      const result = await payment_gateway_service.get_order_sessions(orderId);
+      expect(result).to.deep.equal(fakeResult);
+      expect(stub.calledOnce).to.be.true;
+      expect(stub.calledWith(
+        table_names.sessions,
+        'orderId = :orderId',
+        { ':orderId': orderId }
+      )).to.be.true;
     });
   });
 
@@ -94,10 +198,17 @@ describe('payment_gateway_service', () => {
       const fakeResult = [{ tokenId: 'token1' }];
       const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_user_tokens('user123');
+      const userId = 'user123';
+
+      const result = await payment_gateway_service.get_user_tokens(userId);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_tokens', '#pk = :pk', { ':pk': 'user#user123' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.tokens,
+        '#pk = :pk',
+        { ':pk': `user#${userId}` }, // ExpressionAttributeValues
+        { ExpressionAttributeNames: { '#pk': 'pk' } } // Options with ExpressionAttributeNames
+      )).to.be.true;
     });
   });
 
@@ -106,11 +217,20 @@ describe('payment_gateway_service', () => {
       const fakeResult = [{ tokenId: 'token1' }];
       const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_tokens_soon_to_expire('2025-07');
+      const yyyy_mm = '2025-07';
+
+      const result = await payment_gateway_service.get_tokens_soon_to_expire(yyyy_mm);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_tokens', '#gsi_expiry_pk = :gsi',
-        { ':gsi': 'expiry#2025-07' }, { indexName: 'gsi1' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.tokens,
+        '#expiry = :gsi', // gsi_attribute_names.expiry_pk resolves to '#expiry'
+        { ':gsi': `expiry#${yyyy_mm}` }, // ExpressionAttributeValues
+        {
+          ExpressionAttributeNames: { '#expiry': 'expiry' }, // Options with ExpressionAttributeNames
+          IndexName: 'expiry_gsi' // gsi_index_names.expiry_gsi
+        }
+      )).to.be.true;
     });
   });
 
@@ -119,11 +239,22 @@ describe('payment_gateway_service', () => {
       const fakeResult = [{ transactionId: 'txn1' }];
       const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_failed_transactions('2025-01-01', '2025-12-31');
+      const startDate = '2025-01-01';
+      const endDate = '2025-12-31';
+
+      const result = await payment_gateway_service.get_failed_transactions(startDate, endDate);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_transactions', '#gsi_status_pk = :gsi AND created_at BETWEEN :start AND :end',
-        { ':gsi': 'status#failed', ':start': '2025-01-01', ':end': '2025-12-31' }, { indexName: 'gsi1' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.transactions,
+        '#statusGSI = :gsi', // gsi_attribute_names.status_pk resolves to '#statusGSI'
+        { ':gsi': 'status#failed', ':start': startDate, ':end': endDate }, // ExpressionAttributeValues
+        {
+          ExpressionAttributeNames: { '#statusGSI': 'statusGSI' },
+          IndexName: 'status_gsi', // gsi_index_names.status_gsi
+          FilterExpression: 'created_at BETWEEN :start AND :end'
+        }
+      )).to.be.true;
     });
   });
 
@@ -132,10 +263,17 @@ describe('payment_gateway_service', () => {
       const fakeResult = [{ webhookId: 'webhook1' }];
       const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_order_webhooks('order123');
+      const orderId = 'order123';
+
+      const result = await payment_gateway_service.get_order_webhooks(orderId);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_webhooks', '#pk = :pk', { ':pk': 'order#order123' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.webhooks,
+        '#pk = :pk',
+        { ':pk': `order#${orderId}` },
+        { ExpressionAttributeNames: { '#pk': 'pk' } }
+      )).to.be.true;
     });
   });
 
@@ -144,11 +282,20 @@ describe('payment_gateway_service', () => {
       const fakeResult = [{ webhookId: 'webhook1' }];
       const stub = sinon.stub(scylla_db, 'query').resolves(fakeResult);
 
-      const result = await payment_gateway_service.get_subscription_webhooks('sub123');
+      const subscriptionId = 'sub123';
+
+      const result = await payment_gateway_service.get_subscription_webhooks(subscriptionId);
       expect(result).to.deep.equal(fakeResult);
       expect(stub.calledOnce).to.be.true;
-      expect(stub.calledWith('paymentGateway_webhooks', '#gsi_subscription_pk = :gsi',
-        { ':gsi': 'sub#sub123' }, { indexName: 'gsi1' })).to.be.true;
+      expect(stub.calledWith(
+        table_names.webhooks,
+        '#subscriptionId = :gsi', // gsi_attribute_names.subscription_pk resolves to '#subscriptionId'
+        { ':gsi': `sub#${subscriptionId}` },
+        {
+          ExpressionAttributeNames: { '#subscriptionId': 'subscriptionId' },
+          IndexName: 'webhook_subscription_gsi' // gsi_index_names.webhook_subscription_gsi
+        }
+      )).to.be.true;
     });
   });
 
@@ -158,16 +305,31 @@ describe('payment_gateway_service', () => {
       const sessions = [{ id: 'sess1' }];
       const schedules = [{ id: 'sched1' }];
 
-      sinon.stub(payment_gateway_service, 'get_order_transactions').resolves(txns);
-      sinon.stub(payment_gateway_service, 'get_order_sessions').resolves(sessions);
-      sinon.stub(scylla_db, 'query').resolves(schedules);
+      const orderId = 'order123';
 
-      const result = await payment_gateway_service.get_order_full_data('order123');
+      // Stub the internal methods called by get_order_full_data
+      const getOrderTxnsStub = sinon.stub(payment_gateway_service, 'get_order_transactions').resolves(txns);
+      const getOrderSessionsStub = sinon.stub(payment_gateway_service, 'get_order_sessions').resolves(sessions);
+      // Stub scylla_db.scan for schedules (as it's directly called)
+      const scanSchedulesStub = sinon.stub(scylla_db, 'scan').resolves(schedules);
+
+      const result = await payment_gateway_service.get_order_full_data(orderId);
       expect(result).to.deep.equal({ txns, sessions, schedules });
+
+      // Verify the internal calls
+      expect(getOrderTxnsStub.calledOnceWith(`order#${orderId}`)).to.be.true;
+      expect(getOrderSessionsStub.calledOnceWith(`order#${orderId}`)).to.be.true;
+      expect(scanSchedulesStub.calledOnceWith(
+        table_names.schedules,
+        {
+          FilterExpression: 'orderId = :orderId',
+          ExpressionAttributeValues: { ':orderId': `order#${orderId}` }
+        }
+      )).to.be.true;
     });
   });
 
-  // ===== SAVE METHODS TESTS =====
+  // ===== SAVE METHODS TESTS (No changes expected as putItem seems consistent) =====
 
   describe('saveSession', () => {
     it('should save a session record', async () => {
@@ -183,7 +345,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.saveSession(fakeSession);
       expect(result).to.deep.equal(fakeSession);
-      expect(stub.calledOnceWith('paymentGateway_sessions', fakeSession)).to.be.true;
+      expect(stub.calledOnceWith(table_names.sessions, fakeSession)).to.be.true;
     });
   });
 
@@ -204,7 +366,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.saveTransaction(fakeTransaction);
       expect(result).to.deep.equal(fakeTransaction);
-      expect(stub.calledOnceWith('paymentGateway_transactions', fakeTransaction)).to.be.true;
+      expect(stub.calledOnceWith(table_names.transactions, fakeTransaction)).to.be.true;
     });
   });
 
@@ -228,7 +390,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.saveSchedule(fakeSchedule);
       expect(result).to.deep.equal(fakeSchedule);
-      expect(stub.calledOnceWith('paymentGateway_schedules', fakeSchedule)).to.be.true;
+      expect(stub.calledOnceWith(table_names.schedules, fakeSchedule)).to.be.true;
     });
   });
 
@@ -246,7 +408,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.saveWebhook(fakeWebhook);
       expect(result).to.deep.equal(fakeWebhook);
-      expect(stub.calledOnceWith('paymentGateway_webhooks', fakeWebhook)).to.be.true;
+      expect(stub.calledOnceWith(table_names.webhooks, fakeWebhook)).to.be.true;
     });
   });
 
@@ -264,11 +426,11 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.saveToken(fakeToken);
       expect(result).to.deep.equal(fakeToken);
-      expect(stub.calledOnceWith('paymentGateway_tokens', fakeToken)).to.be.true;
+      expect(stub.calledOnceWith(table_names.tokens, fakeToken)).to.be.true;
     });
   });
 
-  // ===== UPDATE METHODS TESTS =====
+  // ===== UPDATE METHODS TESTS (Adjusted for object PK/SK in updateItem) =====
 
   describe('updateSession', () => {
     it('should update a session record', async () => {
@@ -279,7 +441,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.updateSession(pk, sk, updates);
       expect(result).to.deep.equal(updates);
-      expect(stub.calledOnceWith('paymentGateway_sessions', pk, sk, updates)).to.be.true;
+      expect(stub.calledOnceWith(table_names.sessions, { pk, sk }, updates)).to.be.true; // Updated call
     });
   });
 
@@ -292,7 +454,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.updateTransaction(pk, sk, updates);
       expect(result).to.deep.equal(updates);
-      expect(stub.calledOnceWith('paymentGateway_transactions', pk, sk, updates)).to.be.true;
+      expect(stub.calledOnceWith(table_names.transactions, { pk, sk }, updates)).to.be.true; // Updated call
     });
   });
 
@@ -305,7 +467,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.updateSchedule(pk, sk, updates);
       expect(result).to.deep.equal(updates);
-      expect(stub.calledOnceWith('paymentGateway_schedules', pk, sk, updates)).to.be.true;
+      expect(stub.calledOnceWith(table_names.schedules, { pk, sk }, updates)).to.be.true; // Updated call
     });
   });
 
@@ -318,7 +480,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.updateWebhook(pk, sk, updates);
       expect(result).to.deep.equal(updates);
-      expect(stub.calledOnceWith('paymentGateway_webhooks', pk, sk, updates)).to.be.true;
+      expect(stub.calledOnceWith(table_names.webhooks, { pk, sk }, updates)).to.be.true; // Updated call
     });
   });
 
@@ -331,11 +493,11 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.updateToken(pk, sk, updates);
       expect(result).to.deep.equal(updates);
-      expect(stub.calledOnceWith('paymentGateway_tokens', pk, sk, updates)).to.be.true;
+      expect(stub.calledOnceWith(table_names.tokens, { pk, sk }, updates)).to.be.true; // Updated call
     });
   });
 
-  // ===== DELETE METHODS TESTS =====
+  // ===== DELETE METHODS TESTS (Adjusted for object PK/SK in deleteItem) =====
 
   describe('deleteSession', () => {
     it('should delete a session record', async () => {
@@ -345,7 +507,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.deleteSession(pk, sk);
       expect(result).to.deep.equal({});
-      expect(stub.calledOnceWith('paymentGateway_sessions', pk, sk)).to.be.true;
+      expect(stub.calledOnceWith(table_names.sessions, { pk, sk })).to.be.true; // Updated call
     });
   });
 
@@ -357,7 +519,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.deleteTransaction(pk, sk);
       expect(result).to.deep.equal({});
-      expect(stub.calledOnceWith('paymentGateway_transactions', pk, sk)).to.be.true;
+      expect(stub.calledOnceWith(table_names.transactions, { pk, sk })).to.be.true; // Updated call
     });
   });
 
@@ -369,7 +531,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.deleteSchedule(pk, sk);
       expect(result).to.deep.equal({});
-      expect(stub.calledOnceWith('paymentGateway_schedules', pk, sk)).to.be.true;
+      expect(stub.calledOnceWith(table_names.schedules, { pk, sk })).to.be.true; // Updated call
     });
   });
 
@@ -381,7 +543,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.deleteWebhook(pk, sk);
       expect(result).to.deep.equal({});
-      expect(stub.calledOnceWith('paymentGateway_webhooks', pk, sk)).to.be.true;
+      expect(stub.calledOnceWith(table_names.webhooks, { pk, sk })).to.be.true; // Updated call
     });
   });
 
@@ -393,7 +555,7 @@ describe('payment_gateway_service', () => {
 
       const result = await payment_gateway_service.deleteToken(pk, sk);
       expect(result).to.deep.equal({});
-      expect(stub.calledOnceWith('paymentGateway_tokens', pk, sk)).to.be.true;
+      expect(stub.calledOnceWith(table_names.tokens, { pk, sk })).to.be.true; // Updated call
     });
   });
 

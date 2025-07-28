@@ -1,25 +1,32 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import scylla_db from '../../utils/ScyllaDb.js'
 
+const isTestEnv = ['test'].includes(process.env.NODE_ENV);
+const TABLE_SUFFIX = isTestEnv ? '_test' : '';
+
 const table_names = {
-  sessions: 'paymentGateway_sessions',
-  transactions: 'paymentGateway_transactions',
-  tokens: 'paymentGateway_tokens',
-  schedules: 'paymentGateway_schedules',
-  webhooks: 'paymentGateway_webhooks'
+  sessions: 'paymentGateway_sessions' + TABLE_SUFFIX,
+  transactions: 'paymentGateway_transactions' + TABLE_SUFFIX,
+  tokens: 'paymentGateway_tokens' + TABLE_SUFFIX,
+  schedules: 'paymentGateway_schedules' + TABLE_SUFFIX,
+  webhooks: 'paymentGateway_webhooks' + TABLE_SUFFIX
 }
 
 const gsi_attribute_names = {
-  subscription_pk: '#gsi_subscription_pk',
-  order_pk: '#gsi_order_pk',
-  status_pk: '#gsi_status_pk',
-  expiry_pk: '#gsi_expiry_pk'
+  subscription_pk: '#subscriptionId',
+  order_pk: '#orderGSI',
+  status_pk: '#statusGSI',
+  expiry_pk: '#expiry'
 }
 
 const gsi_index_names = {
-  subscription_gsi: 'gsi1',
-  order_gsi: 'gsi1',
-  status_gsi: 'gsi1',
-  expiry_gsi: 'gsi1'
+  subscription_gsi: 'schedule_subscription_gsi',
+  webhook_subscription_gsi: 'webhook_subscription_gsi',
+  order_gsi: 'order_gsi',
+  status_gsi: 'status_gsi',
+  expiry_gsi: 'expiry_gsi'
 }
 
 /**
@@ -39,8 +46,12 @@ class payment_gateway_service {
    */
   static async get_user_transactions(user_id, start_date, end_date) {
     return scylla_db.query(table_names.transactions,
-      '#pk = :pk AND created_at BETWEEN :start AND :end',
-      { ':pk': `user#${user_id}`, ':start': start_date, ':end': end_date }
+      '#pk = :pk',
+      { ':pk': `user#${user_id}`, ':start': start_date, ':end': end_date },
+      {
+        ExpressionAttributeNames: { '#pk': 'pk' },
+        FilterExpression: 'createdAt BETWEEN :start AND :end'
+      }
     )
   }
 
@@ -52,8 +63,12 @@ class payment_gateway_service {
    */
   static async get_user_schedules(user_id, start_date, end_date) {
     return scylla_db.query(table_names.schedules,
-      '#pk = :pk AND created_at BETWEEN :start AND :end',
-      { ':pk': `user#${user_id}`, ':start': start_date, ':end': end_date }
+      '#pk = :pk',
+      { ':pk': `user#${user_id}`, ':start': start_date, ':end': end_date },
+      {
+        ExpressionAttributeNames: { '#pk': 'pk' },
+        FilterExpression: 'createdAt BETWEEN :start AND :end',
+      }
     )
   }
 
@@ -64,11 +79,16 @@ class payment_gateway_service {
    * @param {string} end_date - optional
    */
   static async get_subscription_schedules(subscription_id, start_date, end_date) {
-    return scylla_db.query(table_names.schedules,
-      `${gsi_attribute_names.subscription_pk} = :gsi AND created_at BETWEEN :start AND :end`,
+    return scylla_db.query(
+      table_names.schedules,
+      `${gsi_attribute_names.subscription_pk} = :gsi`,
       { ':gsi': `sub#${subscription_id}`, ':start': start_date, ':end': end_date },
-      { indexName: gsi_index_names.subscription_gsi }
-    )
+      {
+        IndexName: gsi_index_names.subscription_gsi,
+        ExpressionAttributeNames: { [`${gsi_attribute_names.subscription_pk}`]: 'subscriptionId' },
+        FilterExpression: 'createdAt BETWEEN :start AND :end',
+      }
+    );
   }
 
   /**
@@ -78,11 +98,20 @@ class payment_gateway_service {
    * @param {string} end_date - optional
    */
   static async get_order_transactions(order_id, start_date, end_date) {
-    return scylla_db.query(table_names.transactions,
-      `${gsi_attribute_names.order_pk} = :gsi AND created_at BETWEEN :start AND :end`,
-      { ':gsi': `order#${order_id}`, ':start': start_date, ':end': end_date },
-      { indexName: gsi_index_names.order_gsi }
-    )
+    let FilterExpression = 'orderId = :orderId';
+    let ExpressionAttributeValues = { ':orderId': order_id };
+
+    if (start_date && end_date) {
+      FilterExpression += ' AND createdAt BETWEEN :start AND :end';
+      ExpressionAttributeValues[':start'] = start_date;
+      ExpressionAttributeValues[':end'] = end_date;
+    }
+
+    return scylla_db.scan(
+      table_names.transactions,
+      FilterExpression,
+      ExpressionAttributeValues
+    );
   }
 
   /**
@@ -93,8 +122,12 @@ class payment_gateway_service {
    */
   static async get_user_sessions(user_id, start_date, end_date) {
     return scylla_db.query(table_names.sessions,
-      '#pk = :pk AND created_at BETWEEN :start AND :end',
-      { ':pk': `user#${user_id}`, ':start': start_date, ':end': end_date }
+      '#pk = :pk',
+      { ':pk': `user#${user_id}`, ':start': start_date, ':end': end_date },
+      {
+        ExpressionAttributeNames: { '#pk': 'pk' },
+        FilterExpression: 'createdAt BETWEEN :start AND :end'
+      }
     )
   }
 
@@ -105,11 +138,20 @@ class payment_gateway_service {
    * @param {string} end_date - optional
    */
   static async get_order_sessions(order_id, start_date, end_date) {
-    return scylla_db.query(table_names.sessions,
-      `${gsi_attribute_names.order_pk} = :gsi AND created_at BETWEEN :start AND :end`,
-      { ':gsi': `order#${order_id}`, ':start': start_date, ':end': end_date },
-      { indexName: gsi_index_names.order_gsi }
-    )
+    let FilterExpression = 'orderId = :orderId';
+    let ExpressionAttributeValues = { ':orderId': order_id };
+
+    if (start_date && end_date) {
+      FilterExpression += ' AND createdAt BETWEEN :start AND :end';
+      ExpressionAttributeValues[':start'] = start_date;
+      ExpressionAttributeValues[':end'] = end_date;
+    }
+
+    return scylla_db.scan(
+      table_names.sessions,
+      FilterExpression,
+      ExpressionAttributeValues
+    );
   }
 
   /**
@@ -119,7 +161,8 @@ class payment_gateway_service {
   static async get_user_tokens(user_id) {
     return scylla_db.query(table_names.tokens,
       '#pk = :pk',
-      { ':pk': `user#${user_id}` }
+      { ':pk': `user#${user_id}` },
+      { ExpressionAttributeNames: { '#pk': 'pk' } }
     )
   }
 
@@ -131,7 +174,10 @@ class payment_gateway_service {
     return scylla_db.query(table_names.tokens,
       `${gsi_attribute_names.expiry_pk} = :gsi`,
       { ':gsi': `expiry#${yyyy_mm}` },
-      { indexName: gsi_index_names.expiry_gsi }
+      {
+        ExpressionAttributeNames: { [`${gsi_attribute_names.expiry_pk}`]: "expiry", },
+        IndexName: gsi_index_names.expiry_gsi
+      }
     )
   }
 
@@ -142,9 +188,13 @@ class payment_gateway_service {
    */
   static async get_failed_transactions(start_date, end_date) {
     return scylla_db.query(table_names.transactions,
-      `${gsi_attribute_names.status_pk} = :gsi AND created_at BETWEEN :start AND :end`,
+      `${gsi_attribute_names.status_pk} = :gsi`,
       { ':gsi': 'status#failed', ':start': start_date, ':end': end_date },
-      { indexName: gsi_index_names.status_gsi }
+      {
+        ExpressionAttributeNames: { [`${gsi_attribute_names.status_pk}`]: "statusGSI", },
+        IndexName: gsi_index_names.status_gsi,
+        FilterExpression: 'created_at BETWEEN :start AND :end'
+      }
     )
   }
 
@@ -155,7 +205,8 @@ class payment_gateway_service {
   static async get_order_webhooks(order_id) {
     return scylla_db.query(table_names.webhooks,
       '#pk = :pk',
-      { ':pk': `order#${order_id}` }
+      { ':pk': `order#${order_id}` },
+      { ExpressionAttributeNames: { '#pk': 'pk' } }
     )
   }
 
@@ -167,7 +218,10 @@ class payment_gateway_service {
     return scylla_db.query(table_names.webhooks,
       `${gsi_attribute_names.subscription_pk} = :gsi`,
       { ':gsi': `sub#${subscription_id}` },
-      { indexName: gsi_index_names.subscription_gsi }
+      {
+        ExpressionAttributeNames: { [`${gsi_attribute_names.subscription_pk}`]: 'subscriptionId' },
+        IndexName: gsi_index_names.webhook_subscription_gsi
+      }
     )
   }
 
@@ -176,16 +230,24 @@ class payment_gateway_service {
    * @param {string} order_id - required
    */
   static async get_order_full_data(order_id) {
-    const [txns, sessions, schedules] = await Promise.all([
-      this.get_order_transactions(order_id, null, null),
-      this.get_order_sessions(order_id, null, null),
-      scylla_db.query(table_names.schedules,
-        `${gsi_attribute_names.order_pk} = :gsi`,
-        { ':gsi': `order#${order_id}` },
-        { indexName: gsi_index_names.order_gsi }
-      )
-    ])
-    return { txns, sessions, schedules }
+    let [txns, sessions, schedules] = await Promise.all([
+
+
+      // Get transactions using the existing method (has order_gsi)
+      this.get_order_transactions(`order#${order_id}`),
+
+      this.get_order_sessions(`order#${order_id}`),
+
+      // Get schedules by scanning with filter (no order_gsi available)
+      scylla_db.scan(table_names.schedules, {
+        FilterExpression: 'orderId = :orderId',
+        ExpressionAttributeValues: {
+          ':orderId': `order#${order_id}`
+        }
+      })
+    ]);
+
+    return { txns, sessions, schedules };
   }
 
 
@@ -219,7 +281,7 @@ class payment_gateway_service {
    * @param {object} updates - required, fields to update
    */
   static async updateSession(pk, sk, updates) {
-    return scylla_db.updateItem(table_names.sessions, pk, sk, updates);
+    return scylla_db.updateItem(table_names.sessions, { pk, sk }, updates);
   }
 
   /**
@@ -228,7 +290,7 @@ class payment_gateway_service {
    * @param {string} sk - required, sort key
    */
   static async deleteSession(pk, sk) {
-    return scylla_db.deleteItem(table_names.sessions, pk, sk);
+    return scylla_db.deleteItem(table_names.sessions, { pk, sk });
   }
   // 🟢 transactions
   //   js
@@ -260,7 +322,7 @@ class payment_gateway_service {
    * @param {object} updates - required
    */
   static async updateTransaction(pk, sk, updates) {
-    return scylla_db.updateItem(table_names.transactions, pk, sk, updates);
+    return scylla_db.updateItem(table_names.transactions, { pk, sk }, updates);
   }
 
   /**
@@ -269,7 +331,7 @@ class payment_gateway_service {
    * @param {string} sk - required
    */
   static async deleteTransaction(pk, sk) {
-    return scylla_db.deleteItem(table_names.transactions, pk, sk);
+    return scylla_db.deleteItem(table_names.transactions, { pk, sk });
   }
   // 🟢 schedules
   //   js
@@ -305,7 +367,7 @@ class payment_gateway_service {
    * @param {object} updates - required
    */
   static async updateSchedule(pk, sk, updates) {
-    return scylla_db.updateItem(table_names.schedules, pk, sk, updates);
+    return scylla_db.updateItem(table_names.schedules, { pk, sk }, updates);
   }
 
   /**
@@ -314,7 +376,7 @@ class payment_gateway_service {
    * @param {string} sk - required
    */
   static async deleteSchedule(pk, sk) {
-    return scylla_db.deleteItem(table_names.schedules, pk, sk);
+    return scylla_db.deleteItem(table_names.schedules, { pk, sk });
   }
   // 🟢 webhooks
   //   js
@@ -342,7 +404,7 @@ class payment_gateway_service {
    * @param {object} updates - required
    */
   static async updateWebhook(pk, sk, updates) {
-    return scylla_db.updateItem(table_names.webhooks, pk, sk, updates);
+    return scylla_db.updateItem(table_names.webhooks, { pk, sk }, updates);
   }
 
   /**
@@ -351,7 +413,7 @@ class payment_gateway_service {
    * @param {string} sk - required
    */
   static async deleteWebhook(pk, sk) {
-    return scylla_db.deleteItem(table_names.webhooks, pk, sk);
+    return scylla_db.deleteItem(table_names.webhooks, { pk, sk });
   }
   // 🟢 tokens
   //   js
@@ -379,7 +441,7 @@ class payment_gateway_service {
    * @param {object} updates - required
    */
   static async updateToken(pk, sk, updates) {
-    return scylla_db.updateItem(table_names.tokens, pk, sk, updates);
+    return scylla_db.updateItem(table_names.tokens, { pk, sk }, updates);
   }
 
   /**
@@ -388,7 +450,7 @@ class payment_gateway_service {
    * @param {string} sk - required
    */
   static async deleteToken(pk, sk) {
-    return scylla_db.deleteItem(table_names.tokens, pk, sk);
+    return scylla_db.deleteItem(table_names.tokens, { pk, sk });
   }
 
 
