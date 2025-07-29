@@ -15,8 +15,6 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@sendgrid/client": "^8.1.5",
-    "@sendgrid/mail": "^8.1.5",
     "cassandra-driver": "^4.8.0",
     "express": "^5.1.0"
   },
