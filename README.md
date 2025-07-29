@@ -105,14 +105,15 @@ payment-gateway-service/
 │       └── ScyllaDb.js         # Database utility
 ├── test/
 │   ├── paymentGateway.unit.test.js
-│   └── scyllaDb.test.js
+│   └── paymentGateway.integration.test.js
+|   └── scyllaDb.test.js
+|   └── scyllaDb.marshalling.unit.test.js
 ├── docker-compose.yml
 └── package.json
 ```
 
 ## Dependencies
 
-- `cassandra-driver`: ScyllaDB/Cassandra driver
 - `chai`: Testing framework
 - `mocha`: Test runner
 - `sinon`: Mocking library for tests 
